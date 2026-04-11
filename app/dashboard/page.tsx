@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { motion } from "framer-motion"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
@@ -12,10 +12,12 @@ import {
   TrendingUp,
   Clock,
   Target,
-  Send
+  Send,
+  User
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { getProfile } from "@/lib/api"
 
 const subjects = [
   { name: "Physics", color: "from-blue-500 to-cyan-500", progress: 72, icon: "F=ma" },
@@ -33,6 +35,21 @@ const recentTopics = [
 export default function DashboardHome() {
   const router = useRouter()
   const [chatInput, setChatInput] = useState("")
+  const [userName, setUserName] = useState("")
+
+  useEffect(() => {
+    const loadUser = async () => {
+      try {
+        const data = await getProfile()
+        if (data.user?.full_name) {
+          setUserName(data.user.full_name)
+        }
+      } catch (err) {
+        console.error("Failed to load user:", err)
+      }
+    }
+    loadUser()
+  }, [])
 
   const handleQuickChat = (e: React.FormEvent) => {
     e.preventDefault()
@@ -53,9 +70,13 @@ export default function DashboardHome() {
         <div className="relative">
           <div className="flex items-center gap-2 mb-2">
             <Sparkles className="w-5 h-5" />
-            <span className="text-sm font-medium opacity-90">Good morning!</span>
+            <span className="text-sm font-medium opacity-90">
+              {new Date().getHours() < 12 ? "Good morning" : new Date().getHours() < 18 ? "Good afternoon" : "Good evening"}!
+            </span>
           </div>
-          <h1 className="text-3xl font-bold mb-2">Welcome to Vishwa Mitr</h1>
+          <h1 className="text-3xl font-bold mb-2">
+            Welcome{userName ? `, ${userName.split(' ')[0]}` : ""}!
+          </h1>
           <p className="text-white/80 max-w-lg">
             Continue your learning journey. You have 3 pending quizzes and 2 new topics to explore.
           </p>

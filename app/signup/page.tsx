@@ -7,7 +7,8 @@ import { useRouter } from "next/navigation"
 import { Brain, Mail, Lock, Eye, EyeOff, ArrowRight, User } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { signupUser } from "@/lib/api"
+import { supabase } from "@/lib/supabase"
+import { createUser } from "@/lib/api"
 
 export default function SignupPage() {
   const router = useRouter()
@@ -16,13 +17,33 @@ export default function SignupPage() {
   const [step, setStep] = useState(1)
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
+  const [fullName, setFullName] = useState("")
+  const [selectedClass, setSelectedClass] = useState("")
+  const [selectedSubjects, setSelectedSubjects] = useState<string[]>([])
+  const [preferredLanguage, setPreferredLanguage] = useState("English")
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (step === 1) {
       setIsLoading(true)
       try {
-        await signupUser(email, password)
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password,
+        })
+
+        if (error) {
+          if (error.message.toLowerCase().includes("rate limit")) {
+            throw new Error("Too many signup attempts. Please wait a few minutes and try again.")
+          }
+          throw new Error(error.message)
+        }
+
+        if (data.session?.access_token) {
+          localStorage.setItem("token", data.session.access_token)
+          localStorage.setItem("email", email)
+        }
+
         setStep(2)
       } catch (error: unknown) {
         console.error(error)
@@ -33,9 +54,32 @@ export default function SignupPage() {
       }
       return
     }
+
     setIsLoading(true)
-    await new Promise(resolve => setTimeout(resolve, 1000))
-    router.push("/dashboard")
+    try {
+      await createUser({
+        email,
+        full_name: fullName,
+        user_class: selectedClass,
+        board: "CBSE",
+        target_exam: "JEE",
+      })
+      router.push("/dashboard")
+    } catch (error: unknown) {
+      console.error(error)
+      const message = error instanceof Error ? error.message : "Failed to create profile"
+      alert(message)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const toggleSubject = (subject: string) => {
+    setSelectedSubjects(prev =>
+      prev.includes(subject)
+        ? prev.filter(s => s !== subject)
+        : [...prev, subject]
+    )
   }
 
   return (
@@ -79,6 +123,8 @@ export default function SignupPage() {
                       placeholder="Enter your name"
                       className="pl-10 h-12 rounded-xl"
                       required
+                      value={fullName}
+                      onChange={(e) => setFullName(e.target.value)}
                     />
                   </div>
                 </div>
@@ -133,7 +179,12 @@ export default function SignupPage() {
                       <button
                         key={cls}
                         type="button"
-                        className="p-3 rounded-xl border border-border hover:border-primary hover:bg-primary/5 text-sm font-medium transition-colors"
+                        onClick={() => setSelectedClass(cls)}
+                        className={`p-3 rounded-xl border text-sm font-medium transition-colors ${
+                          selectedClass === cls
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "border-border hover:border-primary hover:bg-primary/5 text-foreground"
+                        }`}
                       >
                         {cls}
                       </button>
@@ -148,7 +199,12 @@ export default function SignupPage() {
                       <button
                         key={subject}
                         type="button"
-                        className="p-3 rounded-xl border border-border hover:border-primary hover:bg-primary/5 text-sm font-medium transition-colors text-left"
+                        onClick={() => toggleSubject(subject)}
+                        className={`p-3 rounded-xl border text-sm font-medium transition-colors text-left ${
+                          selectedSubjects.includes(subject)
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "border-border hover:border-primary hover:bg-primary/5 text-foreground"
+                        }`}
                       >
                         {subject}
                       </button>
@@ -163,7 +219,12 @@ export default function SignupPage() {
                       <button
                         key={lang}
                         type="button"
-                        className="p-3 rounded-xl border border-border hover:border-primary hover:bg-primary/5 text-sm font-medium transition-colors"
+                        onClick={() => setPreferredLanguage(lang)}
+                        className={`p-3 rounded-xl border text-sm font-medium transition-colors ${
+                          preferredLanguage === lang
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "border-border hover:border-primary hover:bg-primary/5 text-foreground"
+                        }`}
                       >
                         {lang}
                       </button>
@@ -173,8 +234,8 @@ export default function SignupPage() {
               </motion.div>
             )}
 
-            <Button 
-              type="submit" 
+            <Button
+              type="submit"
               className="w-full h-12 rounded-xl bg-primary hover:bg-primary/90 gap-2"
               disabled={isLoading}
             >
@@ -189,7 +250,7 @@ export default function SignupPage() {
             </Button>
 
             {step === 2 && (
-              <Button 
+              <Button
                 type="button"
                 variant="ghost"
                 className="w-full"
@@ -267,7 +328,7 @@ export default function SignupPage() {
               </div>
               <h3 className="text-2xl font-bold text-foreground mb-2">Join 10,000+ Students</h3>
               <p className="text-muted-foreground mb-6">Learning smarter with AI-powered education</p>
-              
+
               <div className="grid grid-cols-3 gap-4 text-center">
                 <div>
                   <div className="text-2xl font-bold text-primary">50+</div>

@@ -1,8 +1,9 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { motion } from "framer-motion"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { 
   User,
   Palette,
@@ -18,27 +19,35 @@ import {
   Languages,
   BookOpen,
   Sliders,
-  Save
+  Save,
+  Loader2
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useTheme } from "../layout"
+import { getProfile, updateProfile } from "@/lib/api"
 
 const subjects = ["Physics", "Mathematics", "Chemistry", "Biology", "History", "Geography"]
 const weakTopics = ["Thermodynamics", "Calculus", "Organic Chemistry", "Modern History"]
 const languages = ["English", "Hindi", "Both"]
 const explanationStyles = ["Short & Quick", "Detailed", "Step-by-Step"]
 const difficultyLevels = ["Easy", "Medium", "Advanced"]
+const classLevels = ["8th", "9th", "10th", "11th", "12th", "UG", "PG"]
+const boards = ["CBSE", "ICSE", "State Board", "IB", "Cambridge"]
+const targetExams = ["JEE", "NEET", "UPSC", "CAT", "GRE", "GMAT", "Board Exam", "Other"]
 
 export default function SettingsPage() {
+  const router = useRouter()
   const { theme, setTheme } = useTheme()
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
   const [activeSection, setActiveSection] = useState("profile")
   const [profile, setProfile] = useState({
-    name: "John Doe",
-    email: "john@example.com",
-    class: "12th",
-    subjects: ["Physics", "Mathematics", "Chemistry"],
-    weakTopics: ["Thermodynamics", "Calculus"],
+    full_name: "",
+    email: "",
+    user_class: "12th",
+    board: "CBSE",
+    target_exam: "JEE",
     language: "English"
   })
   const [aiSettings, setAiSettings] = useState({
@@ -48,9 +57,67 @@ export default function SettingsPage() {
   })
   const [saved, setSaved] = useState(false)
 
-  const handleSave = () => {
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
+  useEffect(() => {
+    loadProfile()
+  }, [])
+
+  const loadProfile = async () => {
+    try {
+      const data = await getProfile()
+      console.log("Loaded profile data:", data)
+      if (data.user) {
+        console.log("User language field:", data.user.language)
+        setProfile({
+          full_name: data.user.full_name || "",
+          email: data.user.email || "",
+          user_class: data.user.class || "12th",
+          board: data.user.board || "CBSE",
+          target_exam: data.user.target_exam || "JEE",
+          language: data.user.language || "English"
+        })
+      }
+    } catch (err) {
+      console.error("Failed to load profile:", err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleSave = async () => {
+    setSaving(true)
+    try {
+      console.log("Saving profile:", profile)
+      const result = await updateProfile({
+        full_name: profile.full_name,
+        user_class: profile.user_class,
+        board: profile.board,
+        target_exam: profile.target_exam,
+        language: profile.language
+      })
+      console.log("Update result:", result)
+      
+      console.log("Profile saved, reloading...")
+      const updated = await getProfile()
+      console.log("Reloaded profile:", updated)
+      console.log("Reloaded language:", updated.user?.language)
+      if (updated.user) {
+        setProfile({
+          full_name: updated.user.full_name || "",
+          email: updated.user.email || "",
+          user_class: updated.user.class || "12th",
+          board: updated.user.board || "CBSE",
+          target_exam: updated.user.target_exam || "JEE",
+          language: updated.user.language || "English"
+        })
+      }
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    } catch (err) {
+      console.error("Failed to save:", err)
+      alert("Failed to save: " + (err instanceof Error ? err.message : err))
+    } finally {
+      setSaving(false)
+    }
   }
 
   const sections = [
@@ -100,6 +167,12 @@ export default function SettingsPage() {
             {/* Profile Section */}
             {activeSection === "profile" && (
               <>
+                {loading ? (
+                  <div className="flex items-center justify-center py-12">
+                    <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                  </div>
+                ) : (
+                <>
                 <div className="bg-card border border-border rounded-2xl p-6">
                   <h2 className="text-lg font-semibold text-foreground mb-6 flex items-center gap-2">
                     <User className="w-5 h-5 text-primary" />
@@ -109,8 +182,9 @@ export default function SettingsPage() {
                     <div className="space-y-2">
                       <label className="text-sm font-medium text-foreground">Full Name</label>
                       <Input 
-                        value={profile.name}
-                        onChange={(e) => setProfile({...profile, name: e.target.value})}
+                        value={profile.full_name}
+                        onChange={(e) => setProfile({...profile, full_name: e.target.value})}
+                        placeholder="Enter your name"
                         className="h-12 rounded-xl"
                       />
                     </div>
@@ -118,7 +192,6 @@ export default function SettingsPage() {
                       <label className="text-sm font-medium text-foreground">Email</label>
                       <Input 
                         value={profile.email}
-                        onChange={(e) => setProfile({...profile, email: e.target.value})}
                         className="h-12 rounded-xl"
                         disabled
                       />
@@ -136,12 +209,12 @@ export default function SettingsPage() {
                     <div className="space-y-2">
                       <label className="text-sm font-medium text-foreground">Class / Grade</label>
                       <div className="flex flex-wrap gap-2">
-                        {["8th", "9th", "10th", "11th", "12th", "UG", "PG"].map((cls) => (
+                        {classLevels.map((cls) => (
                           <button
                             key={cls}
-                            onClick={() => setProfile({...profile, class: cls})}
+                            onClick={() => setProfile({...profile, user_class: cls})}
                             className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${
-                              profile.class === cls
+                              profile.user_class === cls
                                 ? "bg-primary text-primary-foreground"
                                 : "bg-muted text-foreground hover:bg-muted/80"
                             }`}
@@ -153,50 +226,38 @@ export default function SettingsPage() {
                     </div>
 
                     <div className="space-y-2">
-                      <label className="text-sm font-medium text-foreground">Subjects</label>
+                      <label className="text-sm font-medium text-foreground">Board</label>
                       <div className="flex flex-wrap gap-2">
-                        {subjects.map((subject) => (
+                        {boards.map((board) => (
                           <button
-                            key={subject}
-                            onClick={() => {
-                              const newSubjects = profile.subjects.includes(subject)
-                                ? profile.subjects.filter(s => s !== subject)
-                                : [...profile.subjects, subject]
-                              setProfile({...profile, subjects: newSubjects})
-                            }}
-                            className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors flex items-center gap-2 ${
-                              profile.subjects.includes(subject)
+                            key={board}
+                            onClick={() => setProfile({...profile, board})}
+                            className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${
+                              profile.board === board
                                 ? "bg-primary text-primary-foreground"
                                 : "bg-muted text-foreground hover:bg-muted/80"
                             }`}
                           >
-                            {profile.subjects.includes(subject) && <Check className="w-4 h-4" />}
-                            {subject}
+                            {board}
                           </button>
                         ))}
                       </div>
                     </div>
 
                     <div className="space-y-2">
-                      <label className="text-sm font-medium text-foreground">Weak Topics (AI will focus on these)</label>
+                      <label className="text-sm font-medium text-foreground">Target Exam</label>
                       <div className="flex flex-wrap gap-2">
-                        {weakTopics.map((topic) => (
+                        {targetExams.map((exam) => (
                           <button
-                            key={topic}
-                            onClick={() => {
-                              const newTopics = profile.weakTopics.includes(topic)
-                                ? profile.weakTopics.filter(t => t !== topic)
-                                : [...profile.weakTopics, topic]
-                              setProfile({...profile, weakTopics: newTopics})
-                            }}
-                            className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors flex items-center gap-2 ${
-                              profile.weakTopics.includes(topic)
-                                ? "bg-amber-500/20 text-amber-600 border border-amber-500/30"
+                            key={exam}
+                            onClick={() => setProfile({...profile, target_exam: exam})}
+                            className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${
+                              profile.target_exam === exam
+                                ? "bg-primary text-primary-foreground"
                                 : "bg-muted text-foreground hover:bg-muted/80"
                             }`}
                           >
-                            {profile.weakTopics.includes(topic) && <Check className="w-4 h-4" />}
-                            {topic}
+                            {exam}
                           </button>
                         ))}
                       </div>
@@ -226,10 +287,12 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
-                <Button onClick={handleSave} className="gap-2">
-                  {saved ? <Check className="w-4 h-4" /> : <Save className="w-4 h-4" />}
-                  {saved ? "Saved!" : "Save Changes"}
+                <Button onClick={handleSave} disabled={saving} className="gap-2">
+                  {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : saved ? <Check className="w-4 h-4" /> : <Save className="w-4 h-4" />}
+                  {saving ? "Saving..." : saved ? "Saved!" : "Save Changes"}
                 </Button>
+                </>
+                )}
               </>
             )}
 

@@ -7,14 +7,12 @@ import { useRouter } from "next/navigation"
 import { Brain, Mail, Lock, Eye, EyeOff, ArrowRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { loginUser } from "@/lib/api" // ✅ ADD
+import { supabase } from "@/lib/supabase"
 
 export default function LoginPage() {
   const router = useRouter()
   const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
-
-  // ✅ ADD
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
 
@@ -23,13 +21,21 @@ export default function LoginPage() {
     setIsLoading(true)
 
     try {
-      // ✅ REAL LOGIN
-      const data = await loginUser(email, password)
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      })
 
-      localStorage.setItem("token", data.access_token)
+      if (error) {
+        throw new Error(error.message)
+      }
+
+      if (data.session?.access_token) {
+        localStorage.setItem("token", data.session.access_token)
+        localStorage.setItem("email", email)
+      }
 
       router.push("/dashboard")
-
     } catch (err: unknown) {
       console.error(err)
       const message = err instanceof Error ? err.message : "Login failed"
@@ -58,7 +64,7 @@ export default function LoginPage() {
           <p className="text-muted-foreground mb-8">Sign in to continue your learning journey</p>
 
           <form onSubmit={handleSubmit} className="space-y-6">
-            
+
             {/* EMAIL */}
             <div className="space-y-2">
               <label className="text-sm font-medium text-foreground">Email</label>
@@ -69,7 +75,8 @@ export default function LoginPage() {
                   placeholder="Enter your email"
                   className="pl-10 h-12 rounded-xl"
                   required
-                  onChange={(e) => setEmail(e.target.value)} // ✅ ADD
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
                 />
               </div>
             </div>
@@ -84,7 +91,8 @@ export default function LoginPage() {
                   placeholder="Enter your password"
                   className="pl-10 pr-10 h-12 rounded-xl"
                   required
-                  onChange={(e) => setPassword(e.target.value)} // ✅ ADD
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
                 />
                 <button
                   type="button"
@@ -106,8 +114,8 @@ export default function LoginPage() {
               </Link>
             </div>
 
-            <Button 
-              type="submit" 
+            <Button
+              type="submit"
               className="w-full h-12 rounded-xl bg-primary hover:bg-primary/90 gap-2"
               disabled={isLoading}
             >

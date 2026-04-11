@@ -15,6 +15,7 @@ import {
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { askAI } from "@/lib/api"
 
 interface Message {
   id: string
@@ -82,15 +83,7 @@ function TutorContent() {
     setIsTyping(true)
 
     try {
-      const response = await fetch("http://localhost:8000/ask", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ question: `[${selectedSubject !== "all" ? selectedSubject.toUpperCase() : "GENERAL"}] ${messageText}` }),
-      })
-
-      const data = await response.json()
+      const data = await askAI(`[${selectedSubject !== "all" ? selectedSubject.toUpperCase() : "GENERAL"}] ${messageText}`)
       const responseContent = data.answer || data.error || "Sorry, I couldn't process your request."
 
       const assistantMessage: Message = {

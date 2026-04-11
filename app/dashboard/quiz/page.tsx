@@ -1,66 +1,57 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { 
-  Clock, 
+import {
+  Clock,
   CheckCircle2,
   XCircle,
   ArrowRight,
   Trophy,
   RotateCcw,
   Play,
-  BookOpen
+  BookOpen,
+  Loader2,
+  ChevronDown
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { generateQuizQuestions, submitQuizResult, getQuizHistory, getQuizQuestions } from "@/lib/api"
 
 interface Question {
-  id: number
+  id: string
   question: string
   options: string[]
   correct: number
   subject: string
+  difficulty: string
 }
 
-const questions: Question[] = [
-  {
-    id: 1,
-    question: "What is Newton's First Law of Motion also known as?",
-    options: ["Law of Acceleration", "Law of Inertia", "Law of Action-Reaction", "Law of Gravity"],
-    correct: 1,
-    subject: "Physics"
-  },
-  {
-    id: 2,
-    question: "What is the derivative of sin(x)?",
-    options: ["-cos(x)", "cos(x)", "tan(x)", "-sin(x)"],
-    correct: 1,
-    subject: "Mathematics"
-  },
-  {
-    id: 3,
-    question: "What is the atomic number of Carbon?",
-    options: ["4", "6", "8", "12"],
-    correct: 1,
-    subject: "Chemistry"
-  },
-  {
-    id: 4,
-    question: "Which of the following is the SI unit of force?",
-    options: ["Joule", "Watt", "Newton", "Pascal"],
-    correct: 2,
-    subject: "Physics"
-  },
-  {
-    id: 5,
-    question: "What is the value of pi (π) to two decimal places?",
-    options: ["3.12", "3.14", "3.16", "3.18"],
-    correct: 1,
-    subject: "Mathematics"
-  },
-]
+interface QuizHistoryItem {
+  id: string
+  subject: string
+  score: number
+  total: number
+  time_taken: number
+  difficulty: string
+  completed_at: string
+}
 
-type QuizState = "idle" | "active" | "completed"
+type QuizState = "idle" | "loading" | "active" | "completed" | "error" | "gemini-fallback"
+
+const SUBJECTS = ["Physics", "Mathematics", "Chemistry", "Biology", "History", "Geography"]
+const DIFFICULTIES = ["easy", "medium", "hard"]
+
+function formatTimeAgo(dateStr: string): string {
+  const date = new Date(dateStr)
+  const now = new Date()
+  const diff = Math.floor((now.getTime() - date.getTime()) / 1000)
+
+  if (diff < 60) return "Just now"
+  if (diff < 3600) return `${Math.floor(diff / 60)} min ago`
+  if (diff < 86400) return `${Math.floor(diff / 3600)} hours ago`
+  if (diff < 604800) return `${Math.floor(diff / 86400)} days ago`
+  return date.toLocaleDateString()
+}
 
 export default function QuizPage() {
   const [quizState, setQuizState] = useState<QuizState>("idle")
@@ -70,12 +61,94 @@ export default function QuizPage() {
   const [showResult, setShowResult] = useState(false)
   const [timeLeft, setTimeLeft] = useState(30)
   const [score, setScore] = useState(0)
+  const [questions, setQuestions] = useState<Question[]>([])
+  const [selectedSubject, setSelectedSubject] = useState("all")
+  const [selectedDifficulty, setSelectedDifficulty] = useState("all")
+  const [showSubjectDropdown, setShowSubjectDropdown] = useState(false)
+  const [quizHistory, setQuizHistory] = useState<QuizHistoryItem[]>([])
+  const [errorMessage, setErrorMessage] = useState("")
+  const [startTime, setStartTime] = useState<number>(0)
+
+  const timerRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Fetch quiz history on mount
+  useEffect(() => {
+    fetchHistory()
+  }, [])
+
+  const fetchHistory = async () => {
+    try {
+      const data = await getQuizHistory()
+      if (data.history) {
+        setQuizHistory(data.history)
+      }
+    } catch (err) {
+      console.error("Failed to fetch history:", err)
+    }
+  }
+
+  const startQuizWithDB = async () => {
+    setQuizState("loading")
+    setErrorMessage("")
+
+    try {
+      const data = await getQuizQuestions({
+        subject: selectedSubject === "all" ? undefined : selectedSubject,
+        difficulty: selectedDifficulty === "all" ? undefined : selectedDifficulty,
+      })
+
+      if (data.questions && data.questions.length > 0) {
+        setQuestions(data.questions)
+        setStartTime(Date.now())
+        setQuizState("active")
+      } else {
+        setErrorMessage("No questions available in database for selected filters.")
+        setQuizState("error")
+      }
+    } catch (err: unknown) {
+      console.error(err)
+      setErrorMessage("Failed to load questions. Please try again.")
+      setQuizState("error")
+    }
+  }
+
+  const startQuiz = async () => {
+    setQuizState("loading")
+    setErrorMessage("")
+    setQuestions([])
+    setAnswers([])
+    setScore(0)
+    setCurrentQuestion(0)
+    setSelectedAnswer(null)
+    setShowResult(false)
+    setTimeLeft(30)
+
+    try {
+      const data = await generateQuizQuestions({
+        subject: selectedSubject === "all" ? "Mixed" : selectedSubject,
+        difficulty: selectedDifficulty === "all" ? "medium" : selectedDifficulty,
+      })
+
+      if (data.questions && data.questions.length > 0) {
+        setQuestions(data.questions)
+        setStartTime(Date.now())
+        setQuizState("active")
+      } else {
+        setErrorMessage("No questions available for selected filters. Try different options.")
+        setQuizState("error")
+      }
+    } catch (err: unknown) {
+      console.error(err)
+      setErrorMessage("Gemini is taking a break. Would you like to try Previous Year Questions instead?")
+      setQuizState("gemini-fallback")
+    }
+  }
 
   const handleNextQuestion = useCallback(() => {
-    if (selectedAnswer !== null) {
+    if (selectedAnswer !== null && questions[currentQuestion]) {
       const newAnswers = [...answers, selectedAnswer]
       setAnswers(newAnswers)
-      
+
       if (selectedAnswer === questions[currentQuestion].correct) {
         setScore(prev => prev + 1)
       }
@@ -87,14 +160,42 @@ export default function QuizPage() {
       setShowResult(false)
       setTimeLeft(30)
     } else {
-      setQuizState("completed")
+      // Quiz completed - submit results
+      completeQuiz()
     }
-  }, [selectedAnswer, answers, currentQuestion])
+  }, [selectedAnswer, answers, currentQuestion, questions])
 
+  const completeQuiz = async () => {
+    const timeTaken = Math.floor((Date.now() - startTime) / 1000)
+
+    // Submit to backend
+    try {
+      await submitQuizResult({
+        subject: selectedSubject === "all" ? "Mixed" : selectedSubject,
+        score,
+        total: questions.length,
+        time_taken: timeTaken,
+        difficulty: selectedDifficulty === "all" ? "mixed" : selectedDifficulty,
+        answers: answers.map((ans, idx) => ({
+          question_id: questions[idx].id,
+          selected_idx: ans ?? -1,
+          correct: ans === questions[idx].correct
+        }))
+      })
+      // Refresh history
+      fetchHistory()
+    } catch (err) {
+      console.error("Failed to save quiz result:", err)
+    }
+
+    setQuizState("completed")
+  }
+
+  // Timer effect
   useEffect(() => {
     if (quizState !== "active" || showResult) return
 
-    const timer = setInterval(() => {
+    timerRef.current = setInterval(() => {
       setTimeLeft(prev => {
         if (prev <= 1) {
           handleNextQuestion()
@@ -104,18 +205,10 @@ export default function QuizPage() {
       })
     }, 1000)
 
-    return () => clearInterval(timer)
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current)
+    }
   }, [quizState, showResult, handleNextQuestion])
-
-  const startQuiz = () => {
-    setQuizState("active")
-    setCurrentQuestion(0)
-    setSelectedAnswer(null)
-    setAnswers([])
-    setShowResult(false)
-    setTimeLeft(30)
-    setScore(0)
-  }
 
   const handleAnswer = (index: number) => {
     if (showResult) return
@@ -130,10 +223,72 @@ export default function QuizPage() {
     setAnswers([])
     setShowResult(false)
     setScore(0)
+    setTimeLeft(30)
+    setErrorMessage("")
   }
 
-  const progress = ((currentQuestion + 1) / questions.length) * 100
+  const progress = questions.length > 0 ? ((currentQuestion + 1) / questions.length) * 100 : 0
 
+  // Error state
+  if (quizState === "error") {
+    return (
+      <div className="max-w-2xl mx-auto text-center py-12">
+        <div className="w-20 h-20 rounded-2xl bg-red-500/10 flex items-center justify-center mx-auto mb-6">
+          <XCircle className="w-10 h-10 text-red-500" />
+        </div>
+        <h2 className="text-2xl font-bold text-foreground mb-2">Oops!</h2>
+        <p className="text-muted-foreground mb-6">{errorMessage}</p>
+        <Button onClick={resetQuiz} className="gap-2">
+          <RotateCcw className="w-4 h-4" />
+          Try Again
+        </Button>
+      </div>
+    )
+  }
+
+  // Gemini Fallback state - user can choose to try PYQ from database
+  if (quizState === "gemini-fallback") {
+    return (
+      <div className="max-w-2xl mx-auto text-center py-12">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="bg-card border border-border rounded-2xl p-8"
+        >
+          <div className="w-20 h-20 rounded-2xl bg-amber-500/10 flex items-center justify-center mx-auto mb-6">
+            <BookOpen className="w-10 h-10 text-amber-500" />
+          </div>
+          <h2 className="text-2xl font-bold text-foreground mb-2">Gemini is Taking a Break</h2>
+          <p className="text-muted-foreground mb-6">
+            {errorMessage || "The AI is currently unavailable. Would you like to try our Previous Year Questions instead?"}
+          </p>
+          <div className="flex gap-4 justify-center flex-wrap">
+            <Button onClick={resetQuiz} variant="outline" className="gap-2">
+              <RotateCcw className="w-4 h-4" />
+              Cancel
+            </Button>
+            <Button onClick={startQuizWithDB} className="gap-2 bg-amber-500 hover:bg-amber-600">
+              <BookOpen className="w-4 h-4" />
+              Try PYQ Instead
+            </Button>
+          </div>
+        </motion.div>
+      </div>
+    )
+  }
+
+  // Loading state
+  if (quizState === "loading") {
+    return (
+      <div className="max-w-2xl mx-auto text-center py-12">
+        <Loader2 className="w-12 h-12 animate-spin text-primary mx-auto mb-4" />
+        <h2 className="text-xl font-bold text-foreground mb-2">Loading Questions...</h2>
+        <p className="text-muted-foreground">Fetching quiz questions for you</p>
+      </div>
+    )
+  }
+
+  // Idle state
   if (quizState === "idle") {
     return (
       <div className="max-w-4xl mx-auto">
@@ -147,12 +302,72 @@ export default function QuizPage() {
           </div>
           <h1 className="text-3xl font-bold text-foreground mb-4">Ready for a Quiz?</h1>
           <p className="text-muted-foreground max-w-md mx-auto mb-8">
-            Test your knowledge with our adaptive quiz system. Answer questions across multiple subjects.
+            Test your knowledge with our adaptive quiz system. Choose your subject and difficulty.
           </p>
+
+          {/* Subject Selection */}
+          <div className="max-w-md mx-auto mb-6">
+            <label className="block text-sm font-medium text-foreground mb-2">Select Subject</label>
+            <div className="relative">
+              <button
+                onClick={() => setShowSubjectDropdown(!showSubjectDropdown)}
+                className="w-full p-3 bg-card border border-border rounded-xl text-left flex items-center justify-between"
+              >
+                <span>{selectedSubject === "all" ? "All Subjects" : selectedSubject}</span>
+                <ChevronDown className="w-5 h-5 text-muted-foreground" />
+              </button>
+              <AnimatePresence>
+                {showSubjectDropdown && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="absolute top-full mt-2 left-0 right-0 bg-card border border-border rounded-xl shadow-lg overflow-hidden z-10"
+                  >
+                    <button
+                      onClick={() => { setSelectedSubject("all"); setShowSubjectDropdown(false) }}
+                      className={`w-full px-4 py-3 text-left hover:bg-muted transition-colors ${selectedSubject === "all" ? "bg-primary/10 text-primary" : "text-foreground"}`}
+                    >
+                      All Subjects
+                    </button>
+                    {SUBJECTS.map(subject => (
+                      <button
+                        key={subject}
+                        onClick={() => { setSelectedSubject(subject); setShowSubjectDropdown(false) }}
+                        className={`w-full px-4 py-3 text-left hover:bg-muted transition-colors ${selectedSubject === subject ? "bg-primary/10 text-primary" : "text-foreground"}`}
+                      >
+                        {subject}
+                      </button>
+                    ))}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          </div>
+
+          {/* Difficulty Selection */}
+          <div className="max-w-md mx-auto mb-8">
+            <label className="block text-sm font-medium text-foreground mb-2">Select Difficulty</label>
+            <div className="flex gap-2 justify-center">
+              {["all", ...DIFFICULTIES].map(diff => (
+                <button
+                  key={diff}
+                  onClick={() => setSelectedDifficulty(diff)}
+                  className={`px-4 py-2 rounded-lg border text-sm font-medium transition-colors ${
+                    selectedDifficulty === diff
+                      ? "border-primary bg-primary/10 text-primary"
+                      : "border-border hover:border-primary/50 text-foreground"
+                  }`}
+                >
+                  {diff === "all" ? "All Levels" : diff.charAt(0).toUpperCase() + diff.slice(1)}
+                </button>
+              ))}
+            </div>
+          </div>
 
           <div className="grid sm:grid-cols-3 gap-4 max-w-lg mx-auto mb-8">
             <div className="bg-card border border-border rounded-xl p-4 text-center">
-              <div className="text-2xl font-bold text-foreground">{questions.length}</div>
+              <div className="text-2xl font-bold text-foreground">5</div>
               <div className="text-sm text-muted-foreground">Questions</div>
             </div>
             <div className="bg-card border border-border rounded-xl p-4 text-center">
@@ -160,8 +375,8 @@ export default function QuizPage() {
               <div className="text-sm text-muted-foreground">Per Question</div>
             </div>
             <div className="bg-card border border-border rounded-xl p-4 text-center">
-              <div className="text-2xl font-bold text-foreground">Mixed</div>
-              <div className="text-sm text-muted-foreground">Subjects</div>
+              <div className="text-2xl font-bold text-foreground">{selectedSubject === "all" ? "Mixed" : selectedSubject}</div>
+              <div className="text-sm text-muted-foreground">Subject</div>
             </div>
           </div>
 
@@ -171,49 +386,45 @@ export default function QuizPage() {
           </Button>
         </motion.div>
 
-        {/* Recent Quizzes */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
-          className="mt-12"
-        >
-          <h2 className="text-xl font-bold text-foreground mb-4">Recent Quiz Results</h2>
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {[
-              { subject: "Physics", score: 8, total: 10, date: "Yesterday" },
-              { subject: "Mathematics", score: 9, total: 10, date: "2 days ago" },
-              { subject: "Chemistry", score: 7, total: 10, date: "3 days ago" },
-            ].map((quiz, index) => (
-              <div 
-                key={index}
-                className="bg-card border border-border rounded-xl p-4"
-              >
-                <div className="flex items-center justify-between mb-3">
-                  <span className="font-medium text-foreground">{quiz.subject}</span>
-                  <span className="text-sm text-muted-foreground">{quiz.date}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
-                    <div 
-                      className="h-full bg-primary rounded-full"
-                      style={{ width: `${(quiz.score / quiz.total) * 100}%` }}
-                    />
+        {/* Recent Quiz History */}
+        {quizHistory.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2 }}
+            className="mt-12"
+          >
+            <h2 className="text-xl font-bold text-foreground mb-4">Your Quiz History</h2>
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {quizHistory.slice(0, 6).map((quiz) => (
+                <div key={quiz.id} className="bg-card border border-border rounded-xl p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="font-medium text-foreground">{quiz.subject}</span>
+                    <span className="text-sm text-muted-foreground">{formatTimeAgo(quiz.completed_at)}</span>
                   </div>
-                  <span className="text-sm font-medium text-foreground">
-                    {quiz.score}/{quiz.total}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full ${quiz.score >= quiz.total * 0.7 ? "bg-green-500" : "bg-amber-500"}`}
+                        style={{ width: `${(quiz.score / quiz.total) * 100}%` }}
+                      />
+                    </div>
+                    <span className="text-sm font-medium text-foreground">
+                      {quiz.score}/{quiz.total}
+                    </span>
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        </motion.div>
+              ))}
+            </div>
+          </motion.div>
+        )}
       </div>
     )
   }
 
+  // Completed state
   if (quizState === "completed") {
-    const percentage = Math.round((score / questions.length) * 100)
+    const percentage = questions.length > 0 ? Math.round((score / questions.length) * 100) : 0
     return (
       <div className="max-w-2xl mx-auto">
         <motion.div
@@ -255,7 +466,7 @@ export default function QuizPage() {
           {/* Answer Summary */}
           <div className="bg-muted/50 rounded-xl p-4 mb-6">
             <h3 className="font-medium text-foreground mb-3">Question Summary</h3>
-            <div className="flex justify-center gap-2">
+            <div className="flex justify-center gap-2 flex-wrap">
               {questions.map((q, index) => (
                 <div
                   key={q.id}
@@ -271,10 +482,10 @@ export default function QuizPage() {
             </div>
           </div>
 
-          <div className="flex gap-4 justify-center">
+          <div className="flex gap-4 justify-center flex-wrap">
             <Button onClick={resetQuiz} variant="outline" className="gap-2">
               <RotateCcw className="w-4 h-4" />
-              Try Again
+              Back to Quiz
             </Button>
             <Button onClick={startQuiz} className="gap-2">
               New Quiz
@@ -286,6 +497,7 @@ export default function QuizPage() {
     )
   }
 
+  // Active quiz state
   const question = questions[currentQuestion]
 
   return (
@@ -321,9 +533,16 @@ export default function QuizPage() {
           exit={{ opacity: 0, x: -20 }}
           className="bg-card border border-border rounded-2xl p-6"
         >
-          <div className="flex items-center gap-2 mb-4">
+          <div className="flex items-center gap-2 mb-4 flex-wrap">
             <span className="px-3 py-1 bg-primary/10 text-primary text-sm font-medium rounded-full">
               {question.subject}
+            </span>
+            <span className={`px-3 py-1 text-sm font-medium rounded-full ${
+              question.difficulty === "easy" ? "bg-green-500/10 text-green-600" :
+              question.difficulty === "medium" ? "bg-amber-500/10 text-amber-600" :
+              "bg-red-500/10 text-red-600"
+            }`}>
+              {question.difficulty}
             </span>
           </div>
 

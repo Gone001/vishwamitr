@@ -1,8 +1,9 @@
 "use client"
 
+import { useState, useEffect } from "react"
 import { motion } from "framer-motion"
-import { 
-  BarChart3, 
+import {
+  BarChart3,
   TrendingUp,
   TrendingDown,
   Clock,
@@ -11,7 +12,8 @@ import {
   Trophy,
   Calendar,
   ArrowUp,
-  ArrowDown
+  ArrowDown,
+  Loader2
 } from "lucide-react"
 import {
   AreaChart,
@@ -27,6 +29,17 @@ import {
   Pie,
   Cell
 } from "recharts"
+import { getQuizHistory } from "@/lib/api"
+
+interface QuizHistoryItem {
+  id: string
+  subject: string
+  score: number
+  total: number
+  time_taken: number
+  difficulty: string
+  completed_at: string
+}
 
 const weeklyProgress = [
   { day: "Mon", hours: 2.5, score: 75 },
@@ -38,13 +51,6 @@ const weeklyProgress = [
   { day: "Sun", hours: 4.2, score: 89 },
 ]
 
-const subjectPerformance = [
-  { subject: "Physics", score: 85, color: "#3B82F6" },
-  { subject: "Maths", score: 92, color: "#8B5CF6" },
-  { subject: "Chemistry", score: 78, color: "#10B981" },
-  { subject: "History", score: 65, color: "#F59E0B" },
-]
-
 const topicDistribution = [
   { name: "Mechanics", value: 25, color: "#3B82F6" },
   { name: "Algebra", value: 20, color: "#8B5CF6" },
@@ -54,52 +60,141 @@ const topicDistribution = [
   { name: "Others", value: 10, color: "#6B7280" },
 ]
 
-const stats = [
-  { 
-    label: "Total Study Hours", 
-    value: "25.2h", 
-    change: "+12%", 
-    trend: "up",
-    icon: Clock,
-    color: "text-blue-500"
-  },
-  { 
-    label: "Average Score", 
-    value: "84%", 
-    change: "+5%", 
-    trend: "up",
-    icon: Target,
-    color: "text-green-500"
-  },
-  { 
-    label: "Topics Completed", 
-    value: "38", 
-    change: "+8", 
-    trend: "up",
-    icon: BookOpen,
-    color: "text-purple-500"
-  },
-  { 
-    label: "Current Streak", 
-    value: "12 days", 
-    change: "+3", 
-    trend: "up",
-    icon: Trophy,
-    color: "text-amber-500"
-  },
-]
+function formatTimeAgo(dateStr: string): string {
+  const date = new Date(dateStr)
+  const now = new Date()
+  const diff = Math.floor((now.getTime() - date.getTime()) / 1000)
 
-const recentActivity = [
-  { action: "Completed Quiz", subject: "Physics - Newton's Laws", score: "9/10", time: "2 hours ago" },
-  { action: "Study Session", subject: "Mathematics - Calculus", score: "45 min", time: "5 hours ago" },
-  { action: "Completed Quiz", subject: "Chemistry - Bonding", score: "8/10", time: "Yesterday" },
-  { action: "Study Session", subject: "Physics - Thermodynamics", score: "60 min", time: "Yesterday" },
-]
+  if (diff < 60) return "Just now"
+  if (diff < 3600) return `${Math.floor(diff / 60)} min ago`
+  if (diff < 86400) return `${Math.floor(diff / 3600)} hours ago`
+  if (diff < 604800) return `${Math.floor(diff / 86400)} days ago`
+  return date.toLocaleDateString()
+}
 
 export default function ReportsPage() {
+  const [quizHistory, setQuizHistory] = useState<QuizHistoryItem[]>([])
+  const [loading, setLoading] = useState(true)
+  const [stats, setStats] = useState([
+    {
+      label: "Total Study Hours",
+      value: "0h",
+      change: "0%",
+      trend: "up" as "up" | "down",
+      icon: Clock,
+      color: "text-blue-500"
+    },
+    {
+      label: "Average Score",
+      value: "0%",
+      change: "0%",
+      trend: "up" as "up" | "down",
+      icon: Target,
+      color: "text-green-500"
+    },
+    {
+      label: "Quizzes Completed",
+      value: "0",
+      change: "0",
+      trend: "up" as "up" | "down",
+      icon: BookOpen,
+      color: "text-purple-500"
+    },
+    {
+      label: "Current Streak",
+      value: "0 days",
+      change: "+0",
+      trend: "up" as "up" | "down",
+      icon: Trophy,
+      color: "text-amber-500"
+    },
+  ])
+
+  const [subjectPerformance, setSubjectPerformance] = useState<{ subject: string; score: number; color: string }[]>([])
+
+  useEffect(() => {
+    fetchData()
+  }, [])
+
+  const fetchData = async () => {
+    try {
+      const data = await getQuizHistory()
+      if (data.history && data.history.length > 0) {
+        setQuizHistory(data.history)
+
+        const subjectScores: Record<string, { total: number; count: number }> = {}
+        data.history.forEach((quiz: QuizHistoryItem) => {
+          if (!subjectScores[quiz.subject]) {
+            subjectScores[quiz.subject] = { total: 0, count: 0 }
+          }
+          subjectScores[quiz.subject].total += (quiz.score / quiz.total) * 100
+          subjectScores[quiz.subject].count += 1
+        })
+
+        const colors = ["#3B82F6", "#8B5CF6", "#10B981", "#F59E0B", "#EC4899", "#6B7280"]
+        const performance = Object.entries(subjectScores).map(([subject, data], index) => ({
+          subject,
+          score: Math.round(data.total / data.count),
+          color: colors[index % colors.length]
+        }))
+        setSubjectPerformance(performance)
+
+        const avgScore = Math.round(data.history.reduce((acc: number, q: QuizHistoryItem) => acc + (q.score / q.total) * 100, 0) / data.history.length)
+        const totalStudyMinutes = data.history.reduce((acc: number, q: QuizHistoryItem) => acc + q.time_taken, 0)
+        const hours = Math.round(totalStudyMinutes / 60 * 10) / 10
+
+        setStats([
+          {
+            label: "Total Study Hours",
+            value: `${hours}h`,
+            change: "+12%",
+            trend: "up",
+            icon: Clock,
+            color: "text-blue-500"
+          },
+          {
+            label: "Average Score",
+            value: `${avgScore}%`,
+            change: "+5%",
+            trend: "up",
+            icon: Target,
+            color: "text-green-500"
+          },
+          {
+            label: "Quizzes Completed",
+            value: data.history.length.toString(),
+            change: "+3",
+            trend: "up",
+            icon: BookOpen,
+            color: "text-purple-500"
+          },
+          {
+            label: "Current Streak",
+            value: "12 days",
+            change: "+3",
+            trend: "up",
+            icon: Trophy,
+            color: "text-amber-500"
+          },
+        ])
+      }
+    } catch (err) {
+      console.error("Failed to fetch quiz history:", err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    )
+  }
+
   return (
     <div className="max-w-6xl mx-auto space-y-8">
-      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Performance Reports</h1>
@@ -111,7 +206,6 @@ export default function ReportsPage() {
         </div>
       </div>
 
-      {/* Stats Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {stats.map((stat, index) => (
           <motion.div
@@ -138,9 +232,7 @@ export default function ReportsPage() {
         ))}
       </div>
 
-      {/* Charts Row */}
       <div className="grid lg:grid-cols-2 gap-6">
-        {/* Weekly Progress Chart */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -189,7 +281,6 @@ export default function ReportsPage() {
           </ResponsiveContainer>
         </motion.div>
 
-        {/* Subject Performance */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -219,9 +310,7 @@ export default function ReportsPage() {
         </motion.div>
       </div>
 
-      {/* Bottom Row */}
       <div className="grid lg:grid-cols-3 gap-6">
-        {/* Topic Distribution */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -265,7 +354,6 @@ export default function ReportsPage() {
           </div>
         </motion.div>
 
-        {/* Recent Activity */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -274,35 +362,38 @@ export default function ReportsPage() {
         >
           <h2 className="text-lg font-semibold text-foreground mb-6">Recent Activity</h2>
           <div className="space-y-4">
-            {recentActivity.map((activity, index) => (
-              <div 
-                key={index}
-                className="flex items-center gap-4 p-3 bg-muted/50 rounded-xl"
-              >
-                <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-                  activity.action.includes("Quiz") ? "bg-green-500/20" : "bg-blue-500/20"
-                }`}>
-                  {activity.action.includes("Quiz") ? (
-                    <Target className="w-5 h-5 text-green-500" />
-                  ) : (
-                    <Clock className="w-5 h-5 text-blue-500" />
-                  )}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-foreground truncate">{activity.subject}</p>
-                  <p className="text-sm text-muted-foreground">{activity.action}</p>
-                </div>
-                <div className="text-right">
-                  <p className="font-medium text-foreground">{activity.score}</p>
-                  <p className="text-sm text-muted-foreground">{activity.time}</p>
-                </div>
+            {loading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
               </div>
-            ))}
+            ) : quizHistory.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                No quiz history yet. Take a quiz to see your activity here.
+              </div>
+            ) : (
+              quizHistory.slice(0, 5).map((activity) => (
+                <div
+                  key={activity.id}
+                  className="flex items-center gap-4 p-3 bg-muted/50 rounded-xl"
+                >
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-green-500/20">
+                    <Target className="w-5 h-5 text-green-500" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-foreground truncate">{activity.subject}</p>
+                    <p className="text-sm text-muted-foreground">Completed Quiz</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-medium text-foreground">{activity.score}/{activity.total}</p>
+                    <p className="text-sm text-muted-foreground">{formatTimeAgo(activity.completed_at)}</p>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </motion.div>
       </div>
 
-      {/* Insights */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
